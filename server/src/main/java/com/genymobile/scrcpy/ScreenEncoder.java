@@ -86,9 +86,6 @@ public class ScreenEncoder implements Device.RotationListener {
         MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
 
         ByteBuffer[] outputBuffers = null;
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            outputBuffers = codec.getOutputBuffers();
-        }
         while (!consumeRotationChange() && !eof) {
             int outputBufferId = codec.dequeueOutputBuffer(bufferInfo, -1);
             eof = (bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
@@ -99,21 +96,29 @@ public class ScreenEncoder implements Device.RotationListener {
                 }
                 if (outputBufferId >= 0) {
                     ByteBuffer outputBuffer;
+                    int size = bufferInfo.size;
+                    int offset = bufferInfo.offset;
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                         outputBuffer = codec.getOutputBuffer(outputBufferId);
                     } else {
+                        if (outputBuffers == null) {
+                            outputBuffers = codec.getOutputBuffers();
+                        }
                         outputBuffer = outputBuffers[outputBufferId];
                     }
-                    while (outputBuffer.hasRemaining()) {
-                        int remaining = outputBuffer.remaining();
-                        int len = Math.min(buf.length, remaining);
+                    while (size > 0) {
+                        int len = Math.min(buf.length, size);
                         // the outputBuffer is probably direct (it has no underlying array), and LocalSocket does not expose channels,
                         // so we must copy the data locally to write them manually to the output stream
-                        outputBuffer.get(buf, 0, len);
+                        outputBuffer.get(buf, offset, len);
                         outputStream.write(buf, 0, len);
+                        size -= len;
+                        offset += len;
                     }
+                    // should rewind data because we changed the internal `posiiton` value
+                    outputBuffer.rewind();
                 } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP && outputBufferId == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                    outputBuffers = codec.getOutputBuffers();
+                    outputBuffers = null;
                 }
             } finally {
                 if (outputBufferId >= 0) {
